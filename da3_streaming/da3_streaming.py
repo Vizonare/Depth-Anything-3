@@ -50,6 +50,53 @@ from depth_anything_3.api import DepthAnything3
 matplotlib.use("Agg")
 
 
+def _canonical_rgb_intrinsic(frame):
+    rgb = frame.modalities.get("rgb")
+    rgb_resolution = tuple(rgb.resolution) if rgb is not None else None
+    for intrinsic in frame.intrinsics.values():
+        if intrinsic.modality == "rgb":
+            return np.asarray(intrinsic.matrix, dtype=np.float32)
+    if rgb_resolution is not None:
+        for intrinsic in frame.intrinsics.values():
+            if tuple(intrinsic.resolution) == rgb_resolution:
+                return np.asarray(intrinsic.matrix, dtype=np.float32)
+    if frame.intrinsics:
+        return np.asarray(next(iter(frame.intrinsics.values())).matrix, dtype=np.float32)
+    raise ValueError(f"canonical frame {frame.id} has no intrinsics")
+
+
+def _canonical_target_priors(canonical_scene_path, global_indices):
+    # Pipeline2 mounts its own src/ into PYTHONPATH for the DA3-Streaming worker;
+    # import here so stock DA3-Streaming remains runnable without Pipeline2.
+    from pipeline2.canonical import GEOMETRY_CAMERA_CONVENTION, POSE_TYPE, read_scene_manifest
+
+    scene_file = Path(canonical_scene_path)
+    scene_path = os.fspath(scene_file)
+    scene = read_scene_manifest(scene_file)
+    frames = scene.roles.get("raw-sensor")
+    if not frames:
+        raise ValueError(f"canonical scene {scene_path} has no raw-sensor frames")
+    if max(global_indices, default=-1) >= len(frames):
+        raise ValueError(
+            f"canonical scene {scene_path} has {len(frames)} raw-sensor frames, "
+            f"cannot supply DA3 priors for frame index {max(global_indices)}"
+        )
+    extrinsics = []
+    intrinsics = []
+    for global_idx in global_indices:
+        frame = frames[global_idx]
+        if frame.pose.pose_type != POSE_TYPE or frame.pose.camera_convention != GEOMETRY_CAMERA_CONVENTION:
+            raise ValueError(
+                f"DA3-Streaming requires OpenCV cam2world target poses; "
+                f"frame {frame.id} declares {frame.pose.pose_type}/{frame.pose.camera_convention}"
+            )
+        target_c2w = np.asarray(frame.pose.matrix, dtype=np.float32)
+        target_w2c = np.linalg.inv(target_c2w).astype(np.float32)
+        extrinsics.append(target_w2c)
+        intrinsics.append(_canonical_rgb_intrinsic(frame))
+    return np.stack(extrinsics, axis=0), np.stack(intrinsics, axis=0), scene_path
+
+
 def depth_to_point_cloud_vectorized(depth, intrinsics, extrinsics, device=None):
     """
     depth: [N, H, W] numpy array or torch tensor
@@ -270,7 +317,26 @@ class DA3_Streaming:
                 images = chunk_image_paths
                 # images: ['xxx.png', 'xxx.png', ...]
 
-                predictions = self.model.inference(images, ref_view_strategy=ref_view_strategy)
+                canonical_scene = self.config["Model"].get("canonical_scene")
+                if canonical_scene:
+                    global_indices = list(range(range_1[0], range_1[1]))
+                    if range_2 is not None:
+                        global_indices += list(range(range_2[0], range_2[1]))
+                    extrinsics, intrinsics, scene_path = _canonical_target_priors(
+                        canonical_scene, global_indices
+                    )
+                    print(
+                        f"Using DA3 target/source camera priors from {scene_path} for "
+                        f"{len(global_indices)} frames ({global_indices[0]}..{global_indices[-1]})"
+                    )
+                    predictions = self.model.inference(
+                        images,
+                        extrinsics=extrinsics,
+                        intrinsics=intrinsics,
+                        ref_view_strategy=ref_view_strategy,
+                    )
+                else:
+                    predictions = self.model.inference(images, ref_view_strategy=ref_view_strategy)
 
                 predictions.depth = np.squeeze(predictions.depth)
                 predictions.conf -= 1.0
