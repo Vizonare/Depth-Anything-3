@@ -814,9 +814,12 @@ class DA3_Streaming:
         first_chunk_range, first_chunk_extrinsics = self.all_camera_poses[0]
         _, first_chunk_intrinsics = self.all_camera_intrinsics[0]
 
-        for i, idx in enumerate(
-            range(first_chunk_range[0], first_chunk_range[1] - self.overlap_e)
-        ):
+        first_chunk_end = (
+            first_chunk_range[1]
+            if len(self.all_camera_poses) == 1
+            else first_chunk_range[1] - self.overlap_e
+        )
+        for i, idx in enumerate(range(first_chunk_range[0], first_chunk_end)):
             w2c = np.eye(4)
             w2c[:3, :] = first_chunk_extrinsics[i]
             c2w = np.linalg.inv(w2c)
