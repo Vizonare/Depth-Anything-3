@@ -690,6 +690,14 @@ class DA3_Streaming:
             )
 
         print("Apply alignment")
+        if len(self.chunk_indices) == 1 and self.config["Model"].get("save_depth_conf_result"):
+            chunk_data_first = np.load(
+                os.path.join(self.result_unaligned_dir, "chunk_0.npy"), allow_pickle=True
+            ).item()
+            self.save_depth_conf_result(
+                chunk_data_first, 0, 1, np.eye(3), np.array([0, 0, 0])
+            )
+
         self.sim3_list = accumulate_sim3_transforms(self.sim3_list)
         for chunk_idx in range(len(self.chunk_indices) - 1):
             print(f"Applying {chunk_idx+1} -> {chunk_idx} (Total {len(self.chunk_indices)-1})")
