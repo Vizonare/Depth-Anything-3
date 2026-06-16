@@ -258,7 +258,9 @@ class DA3_Streaming:
 
         chunk_start, chunk_end = self.chunk_indices[chunk_idx]
 
-        if chunk_idx == 0:
+        if len(self.chunk_indices) == 1:
+            save_indices = list(range(0, chunk_end - chunk_start))
+        elif chunk_idx == 0:
             save_indices = list(range(0, chunk_end - chunk_start - self.overlap_e))
         elif chunk_idx == len(self.chunk_indices) - 1:
             save_indices = list(range(self.overlap_s, chunk_end - chunk_start))
