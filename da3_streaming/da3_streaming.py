@@ -67,9 +67,9 @@ def _canonical_rgb_intrinsic(frame):
 
 
 def _canonical_target_priors(canonical_scene_path, global_indices):
-    # Pipeline2 mounts its own src/ into PYTHONPATH for the DA3-Streaming worker;
-    # import here so stock DA3-Streaming remains runnable without Pipeline2.
-    from pipeline2.canonical import GEOMETRY_CAMERA_CONVENTION, POSE_TYPE, read_scene_manifest
+    # Vizonare-Reconstruction mounts its own src/ into PYTHONPATH for the DA3-Streaming worker;
+    # import here so stock DA3-Streaming remains runnable without Vizonare-Reconstruction.
+    from vizonare_reconstruction.canonical import GEOMETRY_CAMERA_CONVENTION, POSE_TYPE, read_scene_manifest
 
     scene_file = Path(canonical_scene_path)
     scene_path = os.fspath(scene_file)
