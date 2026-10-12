@@ -374,13 +374,42 @@ class DinoVisionTransformer(nn.Module):
         x: torch.Tensor,
         n: Union[int, Sequence] = 1,  # Layers or n last layers to take
         export_feat_layers: List[int] = [],
+        *,
+        consume_feature_storage: bool = False,
         **kwargs,
     ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]]]:
+        """Optionally release retained raw cats during inference normalization.
+
+        The opt-in requires eval, disabled autograd and cat-token features.
+        Raw camera values are preserved, but their storage/strides are compact:
+        callers must restrict activation to ray-pose inference without GS, not
+        camera-decoder/GS consumers. Higher-level activation is not wired here.
+        """
         outputs, aux_outputs = self._get_intermediate_layers_not_chunked(
             x, n, export_feat_layers=export_feat_layers, **kwargs
         )
-        camera_tokens = [out[0] for out in outputs]
-        if outputs[0][1].shape[-1] == self.embed_dim:
+        consume = (
+            consume_feature_storage
+            and not self.training
+            and not torch.is_grad_enabled()
+            and self.cat_token
+            and outputs[0][1].shape[-1] == self.embed_dim * 2
+        )
+        camera_tokens = [out[0].clone() if consume else out[0] for out in outputs]
+        if consume:
+            for i in range(len(outputs)):
+                raw_feature = outputs[i][1]
+                outputs[i] = torch.cat(
+                    [
+                        raw_feature[..., : self.embed_dim],
+                        self.norm(raw_feature[..., self.embed_dim :]),
+                    ],
+                    dim=-1,
+                )
+                # Replacement drops the tuple/camera view; drop the final owner
+                # before the next whole-feature LayerNorm, including the tail.
+                del raw_feature
+        elif outputs[0][1].shape[-1] == self.embed_dim:
             outputs = [self.norm(out[1]) for out in outputs]
         elif outputs[0][1].shape[-1] == (self.embed_dim * 2):
             outputs = [
